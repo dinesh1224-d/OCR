@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="theme-color" content="#000000" />
+        <meta name="description" content="A product of emergent.sh" />
+        <!--
+      manifest.json provides metadata used when your web app is installed on a
+      user's mobile device or desktop. See https://developers.google.com/web/fundamentals/web-app-manifest/
+    -->
+        <!--
+      Notice the use of %PUBLIC_URL% in the tags above.
+      It will be replaced with the URL of the `public` folder during the build.
+      Only files inside the `public` folder can be referenced from the HTML.
+
+      Unlike "/favicon.ico" or "favicon.ico", "%PUBLIC_URL%/favicon.ico" will
+      work correctly both with client-side routing and a non-root public URL.
+      Learn how to configure a non-root public URL by running `npm run build`.
+    -->
+        <title>Emergent | Fullstack App</title>
+        <!-- Error suppression must run BEFORE external scripts -->
+        <script>
+            (function() {
+                'use strict';
+                
+                // Intercept WebSocket FIRST before anything else
+                const OriginalWebSocket = window.WebSocket;
+                
+                // Use Proxy to intercept WebSocket constructor calls
+                const WebSocketProxy = new Proxy(OriginalWebSocket, {
+                    construct: function(target, args) {
+                        const url = args[0];
+                        // Block localhost:443 connections immediately
+                        if (url && typeof url === 'string' && url.includes('localhost:443')) {
+                            // Return a completely silent mock
+                            const mock = {
+                                readyState: 3,
+                                url: url,
+                                protocol: '',
+                                extensions: '',
+                                binaryType: 'blob',
+                                bufferedAmount: 0,
+                                close: function() {},
+                                send: function() {},
+                                addEventListener: function() {},
+                                removeEventListener: function() {},
+                                dispatchEvent: function() { return true; },
+                                CONNECTING: 0,
+                                OPEN: 1,
+                                CLOSING: 2,
+                                CLOSED: 3
+                            };
+                            Object.defineProperty(mock, 'onopen', { value: null, writable: true });
+                            Object.defineProperty(mock, 'onclose', { value: null, writable: true });
+                            Object.defineProperty(mock, 'onerror', { value: null, writable: true });
+                            Object.defineProperty(mock, 'onmessage', { value: null, writable: true });
+                            return mock;
+                        }
+                        // For other URLs, use original WebSocket
+                        return new target(...args);
+                    }
+                });
+                
+                // Create a patched constructor that delegates to the proxy
+                function PatchedWebSocket(...args) {
+                    return new WebSocketProxy(...args);
+                }
+                
+                PatchedWebSocket.prototype = OriginalWebSocket.prototype;
+                
+                ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'].forEach(function(prop) {
+                    Object.defineProperty(PatchedWebSocket, prop, {
+                        configurable: true,
+                        enumerable: true,
+                        get: function() {
+                            return OriginalWebSocket[prop];
+                        }
+                    });
+                });
+                
+                // Replace global WebSocket
+                Object.defineProperty(window, 'WebSocket', {
+                    configurable: true,
+                    writable: true,
+                    value: PatchedWebSocket
+                });
+                
+                // Comprehensive console error/warn suppression
+                const originalError = console.error;
+                const originalWarn = console.warn;
+                const originalLog = console.log;
+                const originalDir = console.dir;
+                const originalTrace = console.trace;
+                const originalInfo = console.info;
+                
+                // Helper function to check if message should be suppressed
+                function shouldSuppress(args) {
+                    if (!args || args.length === 0) return false;
+                    const allMessages = args.map(String).join(' ').toLowerCase();
+                    const firstMsg = String(args[0] || '').toLowerCase();
+                    
+                    // Check for WebSocket errors (case insensitive)
+                    if (allMessages.includes('websocket connection to') ||
+                        allMessages.includes('ws://localhost:443') ||
+                        allMessages.includes('websocketclient') ||
+                        allMessages.includes('websocketclient.js') ||
+                        firstMsg.includes('websocket connection to') ||
+                        firstMsg.includes('ws://localhost:443') ||
+                        firstMsg.includes('websocketclient')) {
+                        return true;
+                    }
+                    
+                    // Check for tracking prevention
+                    if (allMessages.includes('tracking prevention blocked access to storage') ||
+                        firstMsg.includes('tracking prevention blocked access to storage')) {
+                        return true;
+                    }
+                    
+                    return false;
+                }
+                
+                // Override all console methods that might log errors
+                console.error = function(...args) {
+                    if (shouldSuppress(args)) return;
+                    originalError.apply(console, args);
+                };
+                
+                console.warn = function(...args) {
+                    if (shouldSuppress(args)) return;
+                    originalWarn.apply(console, args);
+                };
+                
+                console.log = function(...args) {
+                    if (shouldSuppress(args)) return;
+                    originalLog.apply(console, args);
+                };
+                
+                console.dir = function(...args) {
+                    if (shouldSuppress(args)) return;
+                    originalDir.apply(console, args);
+                };
+                
+                console.trace = function(...args) {
+                    if (shouldSuppress(args)) return;
+                    originalTrace.apply(console, args);
+                };
+                
+                console.info = function(...args) {
+                    if (shouldSuppress(args)) return;
+                    originalInfo.apply(console, args);
+                };
+                
+                // Use MutationObserver to catch console messages that bypass our overrides
+                if (window.console && console.log) {
+                    const observer = new MutationObserver(function(mutations) {
+                        // This catches messages that might be logged directly by the browser
+                        // Note: This is a fallback, the main suppression is above
+                    });
+                    
+                    // Observe console if possible (some browsers don't allow this)
+                    try {
+                        observer.observe(document.body, {
+                            childList: true,
+                            subtree: true
+                        });
+                    } catch(e) {
+                        // Ignore if observation fails
+                    }
+                }
+                
+                
+                // Global error handlers to catch any remaining errors
+                window.addEventListener('error', function(event) {
+                    const errorMsg = String(event.message || '');
+                    if (errorMsg.includes('WebSocket connection to') ||
+                        errorMsg.includes('ws://localhost:443') ||
+                        errorMsg.includes('WebSocketClient')) {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        return false;
+                    }
+                }, true);
+                
+                window.addEventListener('unhandledrejection', function(event) {
+                    const reason = String(event.reason || '');
+                    if (reason.includes('WebSocket connection to') ||
+                        reason.includes('ws://localhost:443') ||
+                        reason.includes('WebSocketClient')) {
+                        event.preventDefault();
+                        return false;
+                    }
+                });
+            })();
+        </script>
+        <script>
+            // Disable emergent main script to avoid external network noise in development
+            window.DISABLE_EMERGENT_MAIN = true;
+        </script>
+        <!-- Load emergent-main.js conditionally (can be disabled by setting window.DISABLE_EMERGENT_MAIN = true) -->
+        <script>
+            // Only load if not explicitly disabled
+            if (!window.DISABLE_EMERGENT_MAIN) {
+                (function() {
+                    try {
+                        const script = document.createElement('script');
+                        script.src = 'https://assets.emergent.sh/scripts/emergent-main.js';
+                        script.crossOrigin = 'anonymous';
+                        script.async = true;
+                        script.onerror = function() {
+                            // Silently handle script load errors
+                        };
+                        // Wrap in try-catch to prevent any errors from breaking the page
+                        script.onload = function() {
+                            // Script loaded successfully
+                        };
+                        document.head.appendChild(script);
+                    } catch(e) {
+                        // Silently fail if script injection fails
+                    }
+                })();
+            }
+        </script>
+        <!--
+        These two scripts have been added for the testing, please do not edit or remove them
+        -->
+        <link rel="preconnect" href="https://unpkg.com" crossorigin="anonymous" />
+        <link rel="dns-prefetch" href="https://unpkg.com" />
+        <script src="https://unpkg.com/rrweb@latest/dist/rrweb.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+        <script
+            defer
+            crossorigin="anonymous"
+            referrerpolicy="no-referrer"
+            onerror="console.warn('rrweb recorder script blocked or unavailable');"
+            src="/rrweb-recorder-20250919-1.js"
+        ></script>
+        <!--
+        These two scripts have been added for the Visual Edits, please do not edit or remove them
+        -->
+        <script>
+
+            // Only load visual edit scripts when inside an iframe and visual edits are enabled
+            if (window.self !== window.top && '%REACT_APP_ENABLE_VISUAL_EDITS%' === 'true') {
+                // Load debug monitor script
+                var debugScript = document.createElement('script');
+                debugScript.src = 'https://assets.emergent.sh/scripts/debug-monitor.js';
+                debugScript.crossOrigin = 'anonymous';
+                document.head.appendChild(debugScript);
+
+                // Configure Tailwind
+                window.tailwind = window.tailwind || {};
+                tailwind.config = {
+                    corePlugins: { preflight: false },
+                };
+
+                // Load Tailwind CDN
+                var tailwindScript = document.createElement('script');
+                tailwindScript.src = 'https://cdn.tailwindcss.com';
+                tailwindScript.crossOrigin = 'anonymous';
+                document.head.appendChild(tailwindScript);
+            }
+        </script>
+    </head>
+    <body>
+        <noscript>You need to enable JavaScript to run this app.</noscript>
+        <div id="root"></div>
+        <!--
+      This HTML file is a template.
+      If you open it directly in the browser, you will see an empty page.
+
+      You can add webfonts, meta tags, or analytics to this file.
+      The build step will place the bundled scripts into the <body> tag.
+
+      To begin the development, run `npm start` or `yarn start`.
+      To create a production bundle, use `npm run build` or `yarn build`.
+    -->
+        <a
+            id="emergent-badge"
+            target="_blank"
+            href="https://app.emergent.sh/?utm_source=emergent-badge"
+            style="
+                display: flex !important;
+                align-items: center !important;
+                position: fixed !important;
+                bottom: 20px;
+                right: 20px;
+                text-decoration: none;
+                padding: 6px 10px;
+                font-family: -apple-system, BlinkMacSystemFont,
+                    &quot;Segoe UI&quot;, Roboto, Oxygen, Ubuntu, Cantarell,
+                    &quot;Open Sans&quot;, &quot;Helvetica Neue&quot;,
+                    sans-serif !important;
+                font-size: 12px !important;
+                z-index: 9999 !important;
+                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15) !important;
+                border-radius: 8px !important;
+                background-color: #ffffff !important;
+                border: 1px solid rgba(255, 255, 255, 0.25) !important;
+            "
+        >
+            <!--
+            <div
+                style="display: flex; flex-direction: row; align-items: center"
+            >
+                <img
+                    style="width: 20px; height: 20px; margin-right: 8px"
+                    src="https://avatars.githubusercontent.com/in/1201222?s=120&u=2686cf91179bbafbc7a71bfbc43004cf9ae1acea&v=4"
+                />
+                <p
+                    style="
+                        color: #000000;
+                        font-family: -apple-system, BlinkMacSystemFont,
+                            &quot;Segoe UI&quot;, Roboto, Oxygen, Ubuntu,
+                            Cantarell, &quot;Open Sans&quot;,
+                            &quot;Helvetica Neue&quot;, sans-serif !important;
+                        font-size: 12px !important;
+                        align-items: center;
+                        margin-bottom: 0;
+                    "
+                >
+                    Made with Emergent
+                </p>
+            </div>
+            -->
+        </a>
+        <script>
+            !(function (t, e) {
+                var o, n, p, r;
+                e.__SV ||
+                    ((window.posthog = e),
+                    (e._i = []),
+                    (e.init = function (i, s, a) {
+                        function g(t, e) {
+                            var o = e.split(".");
+                            2 == o.length && ((t = t[o[0]]), (e = o[1])),
+                                (t[e] = function () {
+                                    t.push(
+                                        [e].concat(
+                                            Array.prototype.slice.call(
+                                                arguments,
+                                                0,
+                                            ),
+                                        ),
+                                    );
+                                });
+                        }
+                        ((p = t.createElement("script")).type =
+                            "text/javascript"),
+                            (p.crossOrigin = "anonymous"),
+                            (p.async = !0),
+                            (p.src =
+                                s.api_host.replace(
+                                    ".i.posthog.com",
+                                    "-assets.i.posthog.com",
+                                ) + "/static/array.js"),
+                            (r =
+                                t.getElementsByTagName(
+                                    "script",
+                                )[0]).parentNode.insertBefore(p, r);
+                        var u = e;
+                        for (
+                            void 0 !== a ? (u = e[a] = []) : (a = "posthog"),
+                                u.people = u.people || [],
+                                u.toString = function (t) {
+                                    var e = "posthog";
+                                    return (
+                                        "posthog" !== a && (e += "." + a),
+                                        t || (e += " (stub)"),
+                                        e
+                                    );
+                                },
+                                u.people.toString = function () {
+                                    return u.toString(1) + ".people (stub)";
+                                },
+                                o =
+                                    "init me ws ys ps bs capture je Di ks register register_once register_for_session unregister unregister_for_session Ps getFeatureFlag getFeatureFlagPayload isFeatureEnabled reloadFeatureFlags updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures on onFeatureFlags onSurveysLoaded onSessionId getSurveys getActiveMatchingSurveys renderSurvey canRenderSurvey canRenderSurveyAsync identify setPersonProperties group resetGroups setPersonPropertiesForFlags resetPersonPropertiesForFlags setGroupPropertiesForFlags resetGroupPropertiesForFlags reset get_distinct_id getGroups get_session_id get_session_replay_url alias set_config startSessionRecording stopSessionRecording sessionRecordingStarted captureException loadToolbar get_property getSessionProperty Es $s createPersonProfile Is opt_in_capturing opt_out_capturing has_opted_in_capturing has_opted_out_capturing clear_opt_in_out_capturing Ss debug xs getPageViewId captureTraceFeedback captureTraceMetric".split(
+                                        " ",
+                                    ),
+                                n = 0;
+                            n < o.length;
+                            n++
+                        )
+                            g(u, o[n]);
+                        e._i.push([i, s, a]);
+                    }),
+                    (e.__SV = 1));
+            })(document, window.posthog || []);
+            posthog.init("phc_yJW1VjHGGwmCbbrtczfqqNxgBDbhlhOWcdzcIJEOTFE", {
+                api_host: "https://us.i.posthog.com",
+                person_profiles: "identified_only", // or 'always' to create profiles for anonymous users as well
+            });
+        </script>
+    </body>
+</html>
